@@ -23,18 +23,6 @@ app.listen(3000, () => {
     console.log("listening on port 3000")
 })
 
-app.get('/home', (req, res) => {
-    res.send("Welcome Home")
-})
-
-app.get('/about', (req, res) => {
-    res.send("I'm Shajia")
-})
-
-app.get('/user/:userid', (req, res) => {
-    const id = req.params.userid;
-    res.send(id)
-})
 
 app.post('/api/signup', async (req, res) => {
     const username = req.body.username;
