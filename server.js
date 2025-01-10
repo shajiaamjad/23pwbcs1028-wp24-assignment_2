@@ -1,92 +1,108 @@
-const bodyParser = require("body-parser");
-const express = require("express");
-const mongoose = require("mongoose");
-const app = express();
-const mongourl = "mongodb://127.0.0.1:27017/assignment2";
-const User = require("./models/user");
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const saltRounds = 10;
-const jwtSecret="mySecretKey";
-
-app.use(bodyParser.json());
-
-mongoose.connect(mongourl)
-    .then(() => {
-        console.log("connected")
-    })
-    .catch((error) => {
-        console.log(error)
-    })
-
-app.listen(3000, () => {
-    console.log("listening on port 3000")
-})
-
-
-app.post('/api/signup', async (req, res) => {
-    const username = req.body.username;
-    const email = req.body.email;
-    const password = req.body.password;
-    bcrypt.hash(password, saltRounds, async (err, hash) => {
-        const user = new User({ username, email, password })
-        user.password = hash;
-        try {
-            await user.save();
-            res.status(201).json({
-                user
-            })
-        }
-        catch (error) {
-            res.status(400).json({
-                error: error.message
-            })
-        }
-    });
-})
-
-app.post('/api/login', async (req, res) => {
-    const email = req.body.email;
-    const pwd = req.body.password;
-    console.log(email, " ", pwd);
-    var user = await User.findOne({ email });
-    console.log(user);
-    if (user!=null && user!==undefined) {
-        if(pwd!==undefined && pwd!==''){
-            bcrypt.compare(pwd, user.password, function (err, result) {
-                if (result == true) {
-                    const token = jwt.sign(
-                        { userId: user._id, email: user.email },
-                        jwtSecret,
-                        { expiresIn: '1h' }
-                    );
-                    res.status(200).json({ message: 'Sign-in successful', token });                }
-                else {
-                    res.status(201).json("incorrect password");
-                }
-            });
-        }
-            else { res.status(201).json("incorrect password"); }
-    }
-    else { res.status(201).json("user not found"); }
-})
-
-//protected route handler
-const protectedRoute = (req, res, next) => {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-        return res.status(401).json({ message: 'No token provided' });
-    }
-    const token = authHeader.split(' ')[1];
-    jwt.verify(token, jwtSecret, (err, decoded) => {
-        if (err) {
-            return res.status(401).json({ message: 'Invalid token' });
-        }
-        req.user = decoded;
-        next();
-    });
+// load env variable
+if (process.env.NODE_ENV != 'production'){
+    require("dotenv").config();
 }
-app.get('/api/protected', protectedRoute, (req, res) => {
-    res.status(200).json({ message: 'Access to protected route granted', user: req.user });
+
+// import dependencies
+const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const connectToDb = require("./config/connectToDb");
+const User = require('./models/user');
+
+// create an express app
+const app = express();
+
+// configure express app
+app.use(express.json());
+
+//connect to database
+connectToDb();
+
+// JWT secret key
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
+
+// POST /api/signup
+app.post('/api/signup', async (req, res) => {
+    const { username, email, password } = req.body;
+    
+    try {
+        // Check if the email already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: 'Email already in use' });
+        }
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Create the user
+        const user = await User.create({
+            username,
+            email,
+            password: hashedPassword,
+        });
+        
+        res.status(201).json({ message: 'User registered successfully', user });
+    } catch (err) {
+        res.status(400).json({ error: 'Error creating user' });
+    }
 });
+
+// POST /api/signin
+app.post('/api/signin', async (req, res) => {
+    const { email, password } = req.body;
+    
+    try {
+        // Find the user by email
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
+        
+        // Compare passwords
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
+        
+        // Generate JWT
+        const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '1h' });
+        
+        res.json({ message: 'Login successful', token });
+    } catch (err) {
+        res.status(500).json({ error: 'Error logging in' });
+    }
+});
+
+// GET /api/protected
+app.get('/api/protected', async (req, res) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
+    
+    try {
+        // Verify JWT
+        const decoded = jwt.verify(token, JWT_SECRET);
+    
+        // Find user by ID
+        const user = await User.findById(decoded.id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+    
+        res.json({ message: 'Access granted', user });
+    } catch (err) {
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+//start our server
+app.listen(process.env.PORT, () => {
+    console.log(`server running on port ${process.env.PORT}`);
+});
+
+
+
+
+
